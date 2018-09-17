@@ -1,5 +1,7 @@
 # mcblaster helper #
 
+mcblaster is an old facebook performance tester for memcached. It supports udp and is small enough to modify for researchers. This repo contains helper scripts to run many instances of the client and the memcached servers.
+
 ### Setup ### 
 1. clone fbmarc/facebook-memcached-old
 2. compile mcblaster (in `/tests`)
