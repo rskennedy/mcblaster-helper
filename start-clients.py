@@ -5,14 +5,15 @@ import os
 
 # path to mcblaster EXECUTABLE
 MCBLASTER_PATH = os.environ['MCBLASTER_PATH']
+# indexes into mcblaster argument string
+port_index = 2
+flow_index = 4
 
 
 class client(object):
-    def __init__(self, hostname, port, rate, duration):
-        self.port = port
-        self.rate = rate
-        self.duration = duration
-        self.args = [MCBLASTER_PATH, "-d", str(duration), "-t", "1", "-r", str(rate), "-u", str(port), hostname]
+    def __init__(self, mcblaster_args):
+        self.args = mcblaster_args
+        self.port = mcblaster_args[port_index]
         self.process = subprocess.Popen(self.args, stdout=subprocess.PIPE)
 
     def get_stdout(self):
@@ -26,63 +27,148 @@ class client(object):
     def get_output(self):
         """
         Attempt to retrieve output from process.
-        If the process is not finished, we wait <duration> seconds and try again.
-        If it is still not finished, we let the caller know to move on,
-        and it should recheck this client at a later time.
+        If the process is not finished, we let the caller know
+        to move on, and it should recheck this client at a later time.
         :return: tuple with stdout and stderr
         """
         if self.process.poll() is None:
-            time.sleep(self.duration);
-            if self.process.poll() is None:
-                return None
+            return None
         return self.process.communicate()
 
 
-def startclients(hostname, starting_port, rate, n, duration, set_first=True):
+def form_mcblaster_args(
+        server="localhost",
+        tcp_port=0,
+        udp_port=12345,
+        flow=None,
+        key_size=1,
+        read_rate=None,
+        nb_threads=None,
+        write_rate=None,
+        value_size=50,
+        duration=5,
+):
+    args = [MCBLASTER_PATH]
+    if tcp_port > 0:
+        args.extend(["-p", str(tcp_port)])
+    else:
+        args.extend(["-u", str(udp_port)])
+    if flow is not None:
+        args.extend(["-f", str(flow)])
+    if read_rate is not None:
+        args.extend(["-r", str(read_rate)])
+    if nb_threads is not None:
+        args.extend(["-t", str(nb_threads)])
+    if write_rate is not None:
+        args.extend(["-w", str(write_rate)])
+    args.extend(["-k", str(key_size), "-z", str(value_size)])
+    args.extend(["-d", str(duration)])
+    args.append(server)
+
+    return args
+
+
+def increment_port_mcblaster_args(mcblaster_args):
     """
-    Create n new clients to blast memcached cluster.
-    :param hostname:
-    :param starting_port: Where to begin incrementing port number.
-    :param rate: How many requests per second for each client.
-    :param n: Number of ports to blast.
-    :return client_list: list of client objects
+    Increment the port value of the mcblaster arguments list.
+    Note that if the arguments list structure is changed, the
+    port index should be changed as well.
+    :param mcblaster_args: List of strings that will eventually
+     be called with mcblaster.
+    :return:
+    """
+    mcblaster_args[port_index] = str(int(mcblaster_args[port_index]) + 1)
+
+
+def increment_flow_mcblaster_args(mcblaster_args):
+    """
+    Increment the flow value of the mcblaster arguments list.
+    Note that if the arguments list structure is changed, the
+    flow index should be changed as well.
+    :param mcblaster_args: List of strings that will eventually
+     be called with mcblaster.
+    :return:
+    """
+    mcblaster_args[flow_index] = str(int(mcblaster_args[flow_index]) + 1)
+
+
+def start_clients(mcblaster_args, generation=0, nb_clients=1):
+    """
+    Creates n client objects that will blast memcached servers.
+    :param mcblaster_args: List of strings that will eventually
+     be called with mcblaster.
+    :param generation: TODO
+    :param nb_clients: number of clients to create.
+    :return: list of client objects all of which have been started.
     """
     client_list = []
-    if set_first:
-        """
-        Make sure to fill each memcached instance with a key before recording GETs. 
-        """
-        for i in range(n):
-            port = starting_port + i
-            args = [MCBLASTER_PATH, "-t", "1", "-d", "1", "-w", "5", "-p", str(port), hostname]
-            subprocess.check_output(args, stderr=subprocess.STDOUT)
     """
     Create each client object which will create a mcblaster subproc on init.
     """
-    for i in range(n):
-        port = starting_port + i
-        client_list.append(client(hostname, port, rate, duration))
+    for i in range(nb_clients):
+        client_list.append(client(mcblaster_args))
+        increment_port_mcblaster_args(mcblaster_args)
+        increment_flow_mcblaster_args(mcblaster_args)
     return client_list
 
 
-if __name__ == '__main__':
+def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("server")
-    parser.add_argument("starting_port", help="port to begin scanning", type=int)
-    parser.add_argument("--rate", help="requests per second", type=int)
-    parser.add_argument("--n", help="number of clients to create", type=int)
+    parser.add_argument("--server", help="server hostname or ip", type=str)
+    parser.add_argument("-p", help="TCP port to begin scanning", type=int)
+    parser.add_argument("-u", help="UDP port to begin scanning", type=int)
+    parser.add_argument("-f", help="flow", type=int)
+    parser.add_argument("-k", help="key size", type=int)
+    parser.add_argument("-r", help="GET requests per second", type=int)
+    parser.add_argument("-t", help="number of threads to use", type=int)
+    parser.add_argument("-w", help="SET requests per second", type=int)
+    parser.add_argument("-z", help="value size", type=int)
+    parser.add_argument("-g", help="generation value", type=int)
+    parser.add_argument("--nb_clients", help="number of clients to create", type=int)
     parser.add_argument("--duration", help="duration of client in seconds", type=int)
+    return parser.parse_args()
 
-    args = parser.parse_args()
-    server = args.server
-    starting_port = args.starting_port
-    rate = args.rate if args.rate else 1000
-    nb_clients = args.n if args.n else 1
-    duration = args.duration if args.duration else 2
 
-    clients = startclients(server, starting_port, rate, nb_clients, duration)
+if __name__ == '__main__':
 
+    args = parse_args()
+
+    server = args.server if args.server else "localhost"
+    tcp_port = args.p if args.p else 0
+    udp_port = args.u if args.u else 12345
+    flow = args.f if args.f else None
+    key_size = args.k if args.k else 1
+    read_rate = args.r if args.r else None
+    nb_threads = args.t if args.t else None
+    write_rate = args.w if args.w else None
+    value_size = args.z if args.z else 50
+    duration = args.duration if args.duration else 5
+    generation = args.g if args.g else 0
+    nb_clients = args.nb_clients if args.nb_clients else 1
+
+    if read_rate == 0 and write_rate == 0:
+        print "Must specify set rate (-w) or get rate (-r) or both."
+        exit(1)
+
+    mcblaster_args = form_mcblaster_args(
+        server,
+        tcp_port,
+        udp_port,
+        flow,
+        key_size,
+        read_rate,
+        nb_threads,
+        write_rate,
+        value_size,
+        duration,
+    )
+
+    clients = start_clients(mcblaster_args, generation, nb_clients)
+
+    # give the clients a chance to talk to their servers
+    time.sleep(duration + 1)
     slow_clients = []
+
     for client in clients:
         stdout = client.get_stdout()
         if stdout is None:
@@ -90,11 +176,11 @@ if __name__ == '__main__':
             continue
 
         print "---------------------------------------"
-        print "Client blasted port {}:".format(client.port)
+        print "Client blasted port {}. stdout below:".format(client.port)
         print stdout
 
     for client in slow_clients:
         stdout = client.get_stdout()
         print "---------------------------------------"
-        print "Client blasted port {}:".format(client.port)
+        print "Client blasted port {}. stdout below:".format(client.port)
         print stdout if stdout else "CLIENT STUCK! moving on"

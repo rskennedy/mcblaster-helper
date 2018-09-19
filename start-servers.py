@@ -1,47 +1,60 @@
 import subprocess
-import sys
 import argparse
+
 
 class memcached(object):
     """
     Stores memcached process state.
 
-    Exposes a TCP (and optionally UDP) port with the given port number.
+    Exposes a UDP and/or TCP port with the given port number(s).
     """
-    def __init__(self, port, debug, with_udp):
-        self.port = port
-        self.args = ["memcached", "-p", str(port)]
+
+    def __init__(self, tcp_port, udp_port, nb_threads, debug):
+        self.tcp_port = tcp_port
+        self.udp_port = udp_port
+        self.nb_threads = nb_threads
+        self.debug = debug
+
+        self.args = ["memcached"]
         if debug:
-                self.args.append("-vv")
-        if with_udp:
-            self.args.extend(["-U", str(port)])
+            self.args.append("-vv")
+        self.args.extend(["-p", str(tcp_port), "-u", str(udp_port), "-t", str(nb_threads)])
         self.p = subprocess.Popen(self.args)
 
     def stop(self):
         self.p.terminate()
 
 
-def start_servers(starting_port, n, debug, with_udp):
+def start_servers(tcp_port, udp_port, nb_threads, nb_servers, debug):
     mc_list = []
-    for i in range(n):
-        port = starting_port + i
-        mc_list.append(memcached(port, debug, with_udp))
+    for _ in range(nb_servers):
+        mc_list.append(memcached(tcp_port, udp_port, nb_threads, debug))
+        if udp_port > 0:
+            udp_port += 1
+        if tcp_port > 0:
+            tcp_port += 1
     return mc_list
 
-if __name__ == '__main__':
-    if len(sys.argv) < 3:
-        print "Not enough arguments. Usage: start-servers.py <start port> <number of instances> [--debug] [--udp]"
-        sys.exit(1)
 
+def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("starting_port", help="Begin creating memcached servers on this port number", type=int)
-    parser.add_argument("n", help="number of instances to create", type=int)
+    parser.add_argument("-p", help="tcp port number", type=int)
+    parser.add_argument("-u", help="udp port number", type=int)
+    parser.add_argument("-t", help="Number of threads per server", type=int)
+    parser.add_argument("--nb_servers", help="number of instances to create", type=int)
     parser.add_argument("--debug", help="Enable debugging", action="store_true")
-    parser.add_argument("--udp", help="Enable udp port (uses same port number as tcp)", action="store_true")
+    return parser.parse_args()
 
-    args = parser.parse_args()
 
-    mc_list = start_servers(args.starting_port, args.n, args.debug, args.udp)
+if __name__ == '__main__':
+    args = parse_args()
+    tcp_port = args.p if args.p else 12345
+    udp_port = args.u if args.u else 12345
+    nb_threads = args.t if args.t else 4
+    nb_servers = args.nb_servers if args.nb_servers else 1
+    debug = args.debug
+
+    mc_list = start_servers(tcp_port, udp_port, nb_threads, nb_servers, debug)
     while True:
         quit = raw_input("quit? y/n")
         if "y" in quit:
