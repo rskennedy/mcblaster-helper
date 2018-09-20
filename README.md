@@ -71,6 +71,7 @@ TCP only client, 20,000 GETs per second, 20 second duration, 4 threads:
  
  
 ### Current Limitations ###
-- Currently dumps stdout from each mcblaster client onto console. Future improvement could be to parse this text and store the latency distribution and throughput in a dict so we can aggregate statistics over all the clients.
+- Currently working on using all of the cores on the system with multiprocessing pools.
+- Latency distribution pretty printing could be much improved. In general, the new code could be cleaned up. The number of if statements in `parse_stats()` is actually a little embarassing.
 - setting value size seems to be broken for modified mcblaster. A value size of 100 results in this:
     - `Internal error: bufsize (120) is too small in compose_set(). Need 133 bytes`

@@ -10,30 +10,86 @@ port_index = 2
 flow_index = 4
 
 
+class stats(object):
+    def __init__(self, request_type=None, throughput=None, avg=None, ld={}):
+        self.request_type = request_type
+        self.throughput = throughput
+        self.avg = avg
+        self.lat_distribution = ld
+
+    def pretty_print(self):
+        print "request type: {}".format(self.request_type)
+        print "throughput: {} requests per second".format(self.throughput)
+        print "average: {} ms".format(self.avg)
+        print "latency distribution: {}".format(self.lat_distribution)
+
+
 class client(object):
     def __init__(self, mcblaster_args):
         self.args = mcblaster_args
         self.port = mcblaster_args[port_index]
-        self.process = subprocess.Popen(self.args, stdout=subprocess.PIPE)
+        self.log_file_path, log_file = self.create_log()
+        self.read_stats = None
+        self.write_stats = None
+        self.process = subprocess.Popen(self.args, stdout=log_file)
+        log_file.close()
 
-    def get_stdout(self):
-        output = self.get_output()
-        return output[0] if output else None
+    def stop(self):
+        while self.process.poll() is None:
+            time.sleep(1)
+        self.log_file_path.close()
 
-    def get_stderr(self):
-        output = self.get_output()
-        return output[1] if output else None
+    def create_log(self):
+        file_path = "logs/mcb_{}".format(self.port)
+        f = open(file_path, "w+")
+        f.write("mcblaster arguments: {}\n\nSTDOUT:\n".format(str(self.args)))
+        f.flush()
+        return file_path, f
 
-    def get_output(self):
-        """
-        Attempt to retrieve output from process.
-        If the process is not finished, we let the caller know
-        to move on, and it should recheck this client at a later time.
-        :return: tuple with stdout and stderr
-        """
+    def get_stats(self, request_type):
+        if "get" == request_type:
+            stats = self.read_stats
+        elif "set" == request_type:
+            stats = self.read_stats
+        else:
+            return None
+        if stats is None:
+            self.parse_stats()
+        return stats
+
+    def parse_stats(self):
         if self.process.poll() is None:
             return None
-        return self.process.communicate()
+
+        curr_stats = None
+        with open(self.log_file_path, "r") as f:
+
+            for line in f:
+                if line.startswith("Request type"):
+                    request_type = line.split(None)[-1].strip()
+                    if request_type == "get":
+                        self.read_stats = stats(request_type)
+                        curr_stats = self.read_stats
+                    else:
+                        self.write_stats = stats(request_type)
+                        curr_stats = self.write_stats
+                elif line.startswith("Rate per second"):
+                    curr_stats.throughput = int(line.split(None)[-1].strip())
+                elif line.startswith("RTT min"):
+                    curr_stats.avg = int(line.split('/')[3].strip())
+
+                elif line.startswith("RTT distribution for 'get'"):
+                    curr_stats = self.read_stats
+                elif line.startswith("RTT distribution for 'set'"):
+                    curr_stats = self.write_stats
+
+                elif line.startswith("["):
+                    interval_start = int(line.split("-", 1)[0].strip()[1:])
+                    height = int(line.split(None)[-1].strip())
+                    curr_stats.lat_distribution[interval_start] = height
+
+                elif line.startswith("Over 10000"):
+                    curr_stats[10000] = line.split(None)[-1].strip()
 
 
 def form_mcblaster_args(
@@ -105,6 +161,7 @@ def start_clients(mcblaster_args, generation=0, nb_clients=1):
     """
     Create each client object which will create a mcblaster subproc on init.
     """
+
     for i in range(nb_clients):
         client_list.append(client(mcblaster_args))
         increment_port_mcblaster_args(mcblaster_args)
@@ -168,19 +225,38 @@ if __name__ == '__main__':
     # give the clients a chance to talk to their servers
     time.sleep(duration + 1)
     slow_clients = []
+    total_stats = stats(request_type="get", throughput=0, avg=0)
+    client_count = 0
 
     for client in clients:
-        stdout = client.get_stdout()
-        if stdout is None:
+        read_stats = client.get_stats("get")
+        if read_stats is None:
             slow_clients.append(client)
             continue
-
-        print "---------------------------------------"
-        print "Client blasted port {}. stdout below:".format(client.port)
-        print stdout
+        client_count += 1
+        total_stats.throughput += read_stats.throughput
+        total_stats.avg += read_stats.avg
+        for (interval_start, height) in read_stats.lat_distribution:
+            try:
+                total_stats.lat_distribution[interval_start] += height
+            except KeyError:
+                total_stats.lat_distribution[interval_start] = height
 
     for client in slow_clients:
-        stdout = client.get_stdout()
-        print "---------------------------------------"
-        print "Client blasted port {}. stdout below:".format(client.port)
-        print stdout if stdout else "CLIENT STUCK! moving on"
+        read_stats = client.get_stats("get")
+        if read_stats is None:
+            print "Client with dest port {} is STUCK! Moving on".format(client.port)
+            continue
+        client_count += 1
+        total_stats.throughput += read_stats.throughput
+        total_stats.avg += read_stats.avg
+        for interval_start, height in read_stats.lat_distribution.iteritems():
+            try:
+                total_stats.lat_distribution[interval_start] += height
+            except KeyError:
+                total_stats.lat_distribution[interval_start] = height
+
+    total_stats.avg /= client_count
+
+    print "Aggregated statistics for {} clients: ".format(client_count)
+    total_stats.pretty_print()
