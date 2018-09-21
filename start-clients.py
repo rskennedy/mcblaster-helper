@@ -9,6 +9,8 @@ MCBLASTER_PATH = os.environ['MCBLASTER_PATH']
 port_index = 2
 flow_index = 4
 
+class EmptyStdoutError(Exception):
+    pass
 
 class stats(object):
     def __init__(self, request_type=None, throughput=None, avg=None, ld={}):
@@ -25,10 +27,10 @@ class stats(object):
 
 
 class client(object):
-    def __init__(self, mcblaster_args):
+    def __init__(self, mcblaster_args, log_path_suffix=None):
         self.args = mcblaster_args
         self.port = mcblaster_args[port_index]
-        self.log_file_path, log_file = self.create_log()
+        self.log_file_path, log_file = self.create_log(log_path_suffix)
         self.read_stats = None
         self.write_stats = None
         self.process = subprocess.Popen(self.args, stdout=log_file)
@@ -39,8 +41,10 @@ class client(object):
             time.sleep(1)
         self.log_file_path.close()
 
-    def create_log(self):
+    def create_log(self, log_path_suffix=None):
         file_path = "logs/mcb_{}".format(self.port)
+	if log_path_suffix is not None:
+		file_path += log_path_suffix
         f = open(file_path, "w+")
         f.write("mcblaster arguments: {}\n\nSTDOUT:\n".format(str(self.args)))
         f.flush()
@@ -63,7 +67,6 @@ class client(object):
 
         curr_stats = None
         with open(self.log_file_path, "r") as f:
-
             for line in f:
                 if line.startswith("Request type"):
                     request_type = line.split(None)[-1].strip()
@@ -90,6 +93,9 @@ class client(object):
 
                 elif line.startswith("Over 10000"):
                     curr_stats[10000] = line.split(None)[-1].strip()
+
+	if curr_stats is None:
+             raise EmptyStdoutError("Log file '{}' has no output. Mcblaster most likely failed.".format(self.log_file_path))
 
 
 def form_mcblaster_args(
@@ -148,7 +154,7 @@ def increment_flow_mcblaster_args(mcblaster_args):
     mcblaster_args[flow_index] = str(int(mcblaster_args[flow_index]) + 1)
 
 
-def start_clients(mcblaster_args, generation=0, nb_clients=1):
+def start_clients(mcblaster_args, generation=0, nb_clients=1, using_flow=False, with_single_server=False):
     """
     Creates n client objects that will blast memcached servers.
     :param mcblaster_args: List of strings that will eventually
@@ -163,9 +169,13 @@ def start_clients(mcblaster_args, generation=0, nb_clients=1):
     """
 
     for i in range(nb_clients):
-        client_list.append(client(mcblaster_args))
-        increment_port_mcblaster_args(mcblaster_args)
-        increment_flow_mcblaster_args(mcblaster_args)
+        if with_single_server is False:
+            client_list.append(client(mcblaster_args))
+            increment_port_mcblaster_args(mcblaster_args)
+	else:
+            client_list.append(client(mcblaster_args, log_path_suffix="_{}".format(i)))
+	if using_flow:
+       	    increment_flow_mcblaster_args(mcblaster_args)
     return client_list
 
 
@@ -183,6 +193,7 @@ def parse_args():
     parser.add_argument("-g", help="generation value", type=int)
     parser.add_argument("--nb_clients", help="number of clients to create", type=int)
     parser.add_argument("--duration", help="duration of client in seconds", type=int)
+    parser.add_argument("--single_server", help="n clients connect to 1 server", action="store_true")
     return parser.parse_args()
 
 
@@ -202,6 +213,8 @@ if __name__ == '__main__':
     duration = args.duration if args.duration else 5
     generation = args.g if args.g else 0
     nb_clients = args.nb_clients if args.nb_clients else 1
+    using_flow = flow is not None
+    with_single_server = args.single_server
 
     if read_rate == 0 and write_rate == 0:
         print "Must specify set rate (-w) or get rate (-r) or both."
@@ -220,7 +233,7 @@ if __name__ == '__main__':
         duration,
     )
 
-    clients = start_clients(mcblaster_args, generation, nb_clients)
+    clients = start_clients(mcblaster_args, generation, nb_clients, using_flow, with_single_server)
 
     # give the clients a chance to talk to their servers
     time.sleep(duration + 1)
@@ -243,6 +256,7 @@ if __name__ == '__main__':
                 total_stats.lat_distribution[interval_start] = height
 
     for client in slow_clients:
+	client.process.wait()
         read_stats = client.get_stats("get")
         if read_stats is None:
             print "Client with dest port {} is STUCK! Moving on".format(client.port)
@@ -256,7 +270,8 @@ if __name__ == '__main__':
             except KeyError:
                 total_stats.lat_distribution[interval_start] = height
 
-    total_stats.avg /= client_count
+    if client_count > 0:
+    	total_stats.avg /= client_count
 
     print "Aggregated statistics for {} clients: ".format(client_count)
     total_stats.pretty_print()
