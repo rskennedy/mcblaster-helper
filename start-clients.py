@@ -9,8 +9,10 @@ MCBLASTER_PATH = os.environ['MCBLASTER_PATH']
 port_index = 2
 flow_index = 4
 
+
 class EmptyStdoutError(Exception):
     pass
+
 
 class stats(object):
     def __init__(self, request_type=None, throughput=None, avg=None, ld={}):
@@ -43,8 +45,8 @@ class client(object):
 
     def create_log(self, log_path_suffix=None):
         file_path = "logs/mcb_{}".format(self.port)
-	if log_path_suffix is not None:
-		file_path += log_path_suffix
+        if log_path_suffix is not None:
+            file_path += log_path_suffix
         f = open(file_path, "w+")
         f.write("mcblaster arguments: {}\n\nSTDOUT:\n".format(str(self.args)))
         f.flush()
@@ -94,8 +96,9 @@ class client(object):
                 elif line.startswith("Over 10000"):
                     curr_stats[10000] = line.split(None)[-1].strip()
 
-	if curr_stats is None:
-             raise EmptyStdoutError("Log file '{}' has no output. Mcblaster most likely failed.".format(self.log_file_path))
+        if curr_stats is None:
+            raise EmptyStdoutError(
+                "Log file '{}' has no output. Mcblaster most likely failed.".format(self.log_file_path))
 
 
 def form_mcblaster_args(
@@ -172,10 +175,10 @@ def start_clients(mcblaster_args, generation=0, nb_clients=1, using_flow=False, 
         if with_single_server is False:
             client_list.append(client(mcblaster_args))
             increment_port_mcblaster_args(mcblaster_args)
-	else:
+        else:
             client_list.append(client(mcblaster_args, log_path_suffix="_{}".format(i)))
-	if using_flow:
-       	    increment_flow_mcblaster_args(mcblaster_args)
+        if using_flow:
+            increment_flow_mcblaster_args(mcblaster_args)
     return client_list
 
 
@@ -256,7 +259,7 @@ if __name__ == '__main__':
                 total_stats.lat_distribution[interval_start] = height
 
     for client in slow_clients:
-	client.process.wait()
+        client.process.wait()
         read_stats = client.get_stats("get")
         if read_stats is None:
             print "Client with dest port {} is STUCK! Moving on".format(client.port)
@@ -271,7 +274,7 @@ if __name__ == '__main__':
                 total_stats.lat_distribution[interval_start] = height
 
     if client_count > 0:
-    	total_stats.avg /= client_count
+        total_stats.avg /= client_count
 
     print "Aggregated statistics for {} clients: ".format(client_count)
     total_stats.pretty_print()
