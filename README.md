@@ -36,6 +36,7 @@ mcblaster is an old facebook performance tester for memcached. It supports udp a
     - `-g`: generation value [0]
     - `--nb_clients`: number of clients to create [1]
     - `--duration`: duration of client in seconds [5]
+    - `--single_server`: n clients connect to 1 server [NO DEFAULT: lack of flag means false]
 
 ### Examples ###
 #### Client ####
